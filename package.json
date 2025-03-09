@@ -1,0 +1,27 @@
+{
+  "name": "circle-expansion-3d",
+  "version": "1.0.0",
+  "description": "A 3D circle expansion game using Three.js",
+  "main": "index.js",
+  "scripts": {
+    "start": "parcel index.html",
+    "build": "parcel build index.html"
+  },
+  "dependencies": {
+    "three": "^0.158.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "parcel": "^2.10.0",
+    "process": "^0.11.10"
+  },
+  "keywords": [
+    "three.js",
+    "game",
+    "web",
+    "io-game"
+  ],
+  "author": "",
+  "license": "MIT"
+}
