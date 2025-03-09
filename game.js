@@ -3,6 +3,31 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 
+// Add Web3 script first
+const web3Script = document.createElement('script');
+web3Script.src = 'https://cdn.jsdelivr.net/npm/web3@1.5.2/dist/web3.min.js';
+web3Script.async = true;
+document.head.appendChild(web3Script);
+
+// Initialize AdSense
+const adScript = document.createElement('script');
+adScript.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
+adScript.async = true;
+document.head.appendChild(adScript);
+
+// Wait for scripts to load
+let web3Manager, adManager;
+
+Promise.all([
+    new Promise(resolve => web3Script.onload = resolve),
+    new Promise(resolve => adScript.onload = resolve)
+]).then(async () => {
+    const { Web3Manager } = await import('./web3.js');
+    const { AdManager } = await import('./ads.js');
+    web3Manager = new Web3Manager();
+    adManager = new AdManager();
+});
+
 // Input state management
 const InputState = {
     keys: new Set(),
@@ -296,6 +321,33 @@ class UIManager {
     createConnectingUI() {
         this.createUIElement('IO Game Battle', 40, 'yellow', 'connecting', 'connect-title', '20%');
         
+        // Add banner ad at the top if adManager is ready
+        if (typeof adManager !== 'undefined') {
+            const adContainer = document.createElement('div');
+            adContainer.id = 'banner-ad';
+            adContainer.style.position = 'absolute';
+            adContainer.style.top = '0';
+            adContainer.style.left = '50%';
+            adContainer.style.transform = 'translateX(-50%)';
+            adContainer.style.width = '728px';
+            adContainer.style.height = '90px';
+            document.body.appendChild(adContainer);
+            adManager.createAdSlot('banner-ad', 'horizontal');
+        }
+        
+        // Add Web3 connect button if web3Manager is ready
+        if (typeof web3Manager !== 'undefined') {
+            this.createButton('Connect Wallet', 'connecting', 'connect-wallet-btn', async () => {
+                const connected = await web3Manager.init();
+                if (connected) {
+                    const balance = await web3Manager.getBalance();
+                    this.updateElement('wallet-status', `Connected - Balance: ${balance} ETH`);
+                }
+            }, '30%');
+            
+            this.createUIElement('Not connected', 16, '#aaaaaa', 'connecting', 'wallet-status', '35%');
+        }
+        
         // Create lobby button
         this.createButton('Create New Lobby', 'connecting', 'create-lobby-btn', () => {
             game.createLobby();
@@ -443,9 +495,48 @@ class UIManager {
     }
     
     createWinUI(winner) {
-        this.createUIElement(`${winner.name} Wins!`, 50, '#' + winner.color.toString(16).padStart(6, '0'), 'win', 'win-message');
-        this.createUIElement(`Final size: ${winner.size.toFixed(1)}`, 24, 'white', 'win', 'win-size', '60%');
-        this.createButton('Back to Lobby', 'win', 'lobby-btn', () => game.requestLobby(), '70%');
+        // Game over title
+        this.createUIElement(`${winner.name} Wins!`, 50, '#' + winner.color.toString(16).padStart(6, '0'), 'win', 'win-message', '30%');
+        this.createUIElement(`Final size: ${winner.size.toFixed(1)}`, 24, 'white', 'win', 'win-size', '40%');
+        
+        // Add interstitial ad if adManager is ready
+        if (typeof adManager !== 'undefined') {
+            const adContainer = document.createElement('div');
+            adContainer.id = 'win-ad';
+            adContainer.style.position = 'absolute';
+            adContainer.style.top = '50%';
+            adContainer.style.left = '50%';
+            adContainer.style.transform = 'translate(-50%, -50%)';
+            adContainer.style.width = '336px';
+            adContainer.style.height = '280px';
+            adContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            adContainer.style.zIndex = '1000';
+            document.body.appendChild(adContainer);
+            adManager.createAdSlot('win-ad', 'rectangle');
+        }
+        
+        // If winner is local player and web3Manager is ready, distribute reward
+        if (typeof web3Manager !== 'undefined' && winner.id === localPlayerId && web3Manager.initialized) {
+            this.createUIElement('Processing Rewards...', 18, '#4CAF50', 'win', 'reward-status', '55%');
+            web3Manager.distributeReward(web3Manager.account)
+                .then(() => {
+                    this.updateElement('reward-status', '🎉 Rewards sent to your wallet!');
+                })
+                .catch(error => {
+                    console.error('Reward distribution error:', error);
+                    this.updateElement('reward-status', '❌ Failed to send rewards');
+                });
+        }
+        
+        // Add back button after short delay to ensure ad is shown
+        setTimeout(() => {
+            this.createButton('Back to Lobby', 'win', 'lobby-btn', () => {
+                if (typeof adManager !== 'undefined') {
+                    adManager.hideAd('win-ad');
+                }
+                game.requestLobby();
+            }, '70%');
+        }, 2000);
     }
 }
 
