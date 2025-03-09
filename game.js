@@ -37,9 +37,9 @@ const InputState = {
 const CONFIG = {
     foodCount: 150, // More food for more action
     particleCount: 50, // Number of background particles
-    particleSpeed: 0.1, // Speed of background particles
-    trailLength: 8, // Length of player trails
-    pulseSpeed: 3, // Speed of glow pulse effect
+    particleSpeed: 0.02, // Speed of background particles
+    trailLength: 20, // Length of player trails
+    pulseSpeed: 0.5, // Speed of glow pulse effect
     foodParticleCount: 3, // Number of particles orbiting each food item
     foodParticleSpeed: 2, // Speed of orbiting food particles
     playerStartSize: 1,
@@ -53,11 +53,7 @@ const CONFIG = {
     reconnectDelay: 1000,
     inputUpdateInterval: 33, // ~30 updates per second for smoother control
     renderInterval: 1000 / 120, // 120 FPS target for smoother animation
-    interpolationDelay: 50, // Reduced for more responsive gameplay
-    particleCount: 50, // Number of background particles
-    particleSpeed: 0.02, // Speed of background particles
-    trailLength: 20, // Length of player trails
-    pulseSpeed: 0.5 // Speed of size pulsing effect
+    interpolationDelay: 50 // Reduced for more responsive gameplay
 };
 
 // Create the scene, camera, and renderer
@@ -80,19 +76,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 renderer.setClearColor(0x000000, 0.9); // Slightly transparent background
 
-// Add post-processing effects
-const composer = new THREE.EffectComposer(renderer);
-const renderPass = new THREE.RenderPass(scene, camera);
-composer.addPass(renderPass);
-
-// Add bloom effect
-const bloomPass = new THREE.UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    1.5, // Bloom strength
-    0.4, // Radius
-    0.85 // Threshold
-);
-composer.addPass(bloomPass);
+// We'll use built-in glow effects instead of post-processing for better performance
 
 // Enable shadow mapping for better visuals
 renderer.shadowMap.enabled = true;
@@ -1151,11 +1135,12 @@ class Game {
     }
     
     createFood(foodInfo) {
-        const foodGeometry = new THREE.CircleGeometry(CONFIG.foodSize, 16);
+        const foodGeometry = new THREE.CircleGeometry(CONFIG.foodSize, 32);
         const foodMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 time: { value: 0 },
-                pulseSpeed: { value: CONFIG.pulseSpeed * 2 }
+                pulseSpeed: { value: CONFIG.pulseSpeed * 2 },
+                glowColor: { value: new THREE.Vector3(1.0, 0.3, 0.3) }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -1167,14 +1152,15 @@ class Game {
             fragmentShader: `
                 uniform float time;
                 uniform float pulseSpeed;
+                uniform vec3 glowColor;
                 varying vec2 vUv;
                 void main() {
                     float dist = length(vUv - vec2(0.5));
                     float pulse = 0.5 + 0.5 * sin(time * pulseSpeed);
-                    float alpha = smoothstep(0.5, 0.3, dist);
-                    vec3 baseColor = vec3(1.0, 0.0, 0.0);
-                    vec3 glowColor = mix(baseColor, vec3(1.0, 0.5, 0.5), dist * pulse);
-                    gl_FragColor = vec4(glowColor, alpha);
+                    float alpha = smoothstep(0.5, 0.2, dist);
+                    vec3 baseColor = glowColor;
+                    vec3 glowColor = mix(baseColor, vec3(1.0), dist * pulse);
+                    gl_FragColor = vec4(glowColor, alpha * (1.0 - dist * 0.5));
                 }
             `,
             transparent: true
@@ -1185,26 +1171,32 @@ class Game {
         // Add particle effect
         const particles = [];
         for (let i = 0; i < CONFIG.foodParticleCount; i++) {
-            const particleGeometry = new THREE.CircleGeometry(CONFIG.foodSize * 0.2, 8);
+            const particleGeometry = new THREE.CircleGeometry(CONFIG.foodSize * 0.2, 16);
             const particleMaterial = new THREE.ShaderMaterial({
                 uniforms: {
                     time: { value: 0 },
-                    pulseSpeed: { value: CONFIG.pulseSpeed * 1.5 }
+                    pulseSpeed: { value: CONFIG.pulseSpeed * 2 },
+                    glowColor: { value: new THREE.Vector3(1.0, 0.5, 0.5) }
                 },
                 vertexShader: `
+                    varying vec2 vUv;
                     void main() {
+                        vUv = uv;
                         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
                     }
                 `,
                 fragmentShader: `
                     uniform float time;
                     uniform float pulseSpeed;
+                    uniform vec3 glowColor;
+                    varying vec2 vUv;
                     void main() {
-                        float pulse = 0.5 + 0.5 * sin(time * pulseSpeed);
-                        vec3 baseColor = vec3(1.0, 0.4, 0.4);
-                        vec3 pulseColor = vec3(1.0, 0.8, 0.8);
-                        vec3 finalColor = mix(baseColor, pulseColor, pulse);
-                        gl_FragColor = vec4(finalColor, 0.5);
+                        float dist = length(vUv - vec2(0.5));
+                        float pulse = 0.5 + 0.5 * sin(time * pulseSpeed + dist * 10.0);
+                        float alpha = smoothstep(0.5, 0.1, dist) * (0.6 + 0.4 * pulse);
+                        vec3 baseColor = glowColor;
+                        vec3 finalColor = mix(baseColor, vec3(1.0), dist * pulse);
+                        gl_FragColor = vec4(finalColor, alpha);
                     }
                 `,
                 transparent: true
@@ -1479,9 +1471,10 @@ function animate() {
         
         if (food.userData.particles) {
             food.userData.particles.forEach((particle, i) => {
+                // Update particle position
                 particle.userData.angle += particle.userData.speed * 0.02;
                 const angle = particle.userData.angle;
-                const radius = particle.userData.radius;
+                const radius = particle.userData.radius * (1 + 0.1 * Math.sin(time * 2));
                 
                 particle.position.set(
                     food.position.x + Math.cos(angle) * radius,
@@ -1489,14 +1482,16 @@ function animate() {
                     0
                 );
                 
-                // Pulse opacity
-                particle.material.opacity = 0.3 + 0.2 * Math.sin(time * 3 + i * Math.PI * 2 / 3);
+                // Update particle shader uniforms
+                if (particle.material.uniforms) {
+                    particle.material.uniforms.time.value = time;
+                }
             });
         }
     });
     
     game.update();
-    composer.render(); // Use composer instead of renderer for post-processing
+    renderer.render(scene, camera);
     css2dRenderer.render(scene, camera);
 }
 
